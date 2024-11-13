@@ -1,6 +1,6 @@
 # jetstream-oxide
 
-[![Crate](https://img.shields.io/crates/v/jetstream-oxide.svg)](https://crates.io/crates/quick-xml)
+[![Crate](https://img.shields.io/crates/v/jetstream-oxide.svg)](https://crates.io/crates/jetstream-oxide)
 [![docs.rs](https://docs.rs/jetstream-oxide/badge.svg)](https://docs.rs/jetstream-oxide/latest/jetstream_oxide)
 
 A typed Rust library for easily interacting with and consuming the
