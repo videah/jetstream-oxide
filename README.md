@@ -1,5 +1,8 @@
 # jetstream-oxide
 
+[![Crate](https://img.shields.io/crates/v/jetstream-oxide.svg)](https://crates.io/crates/quick-xml)
+[![docs.rs](https://docs.rs/jetstream-oxide/badge.svg)](https://docs.rs/crate/jetstream-oxidel)
+
 A typed Rust library for easily interacting with and consuming the
 Bluesky [Jetstream](https://github.com/bluesky-social/jetstream)
 service.
