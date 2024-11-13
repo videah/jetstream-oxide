@@ -4,7 +4,7 @@ A typed Rust library for easily interacting with and consuming the
 Bluesky [Jetstream](https://github.com/bluesky-social/jetstream)
 service.
 
-# Example
+## Example
 
 A small example CLI utility to show how to use this crate can be found in the `examples` directory. To run it, use the
 following command:
