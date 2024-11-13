@@ -4,7 +4,7 @@ name = "jetstream-oxide"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-license-file = "LICENSE"
+description = "Library for easily interacting with and consuming the Bluesky Jetstream service."
 repository = "https://github.com/videah/jetstream-oxide"
 readme = "README.md"
 
