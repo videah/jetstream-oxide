@@ -1,7 +1,12 @@
 [package]
+authors = ["videah <videah@selfish.systems>"]
 name = "jetstream-oxide"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+license-file = "LICENSE"
+repository = "https://github.com/videah/jetstream-oxide"
+readme = "README.md"
 
 [dependencies]
 async-trait = "0.1.83"
