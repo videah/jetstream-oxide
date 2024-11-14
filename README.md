@@ -21,13 +21,13 @@ while let Ok(event) = receiver.recv_async().await {
     if let Commit(commit) = event {
         match commit {
             CommitEvent::Create { info, commit } => {
-                println ! ("Received create event: {:#?}", info);
+                println!("Received create event: {:#?}", info);
             }
             CommitEvent::Update { info, commit } => {
-                println ! ("Received update event: {:#?}", info);
+                println!("Received update event: {:#?}", info);
             }
             CommitEvent::Delete { info, commit } => {
-                println ! ("Received delete event: {:#?}", info);
+                println!("Received delete event: {:#?}", info);
             }
         }
     }
