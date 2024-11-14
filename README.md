@@ -11,7 +11,7 @@ service.
 let config = JetstreamConfig {
     endpoint: DefaultJetstreamEndpoints::USEastOne.into(),
     compression: JetstreamCompression::Zstd,
-    ..Default::default ()
+    ..Default::default()
 };
 
 let jetstream = JetstreamConnector::new(config).unwrap();
