@@ -7,6 +7,33 @@ A typed Rust library for easily interacting with and consuming the
 Bluesky [Jetstream](https://github.com/bluesky-social/jetstream)
 service.
 
+```rust
+let config = JetstreamConfig {
+    endpoint: DefaultJetstreamEndpoints::USEastOne.into(),
+    compression: JetstreamCompression::Zstd,
+    ..Default::default ()
+};
+
+let jetstream = JetstreamConnector::new(config).unwrap();
+let (receiver, _) = jetstream.connect().await.unwrap();
+
+while let Ok(event) = receiver.recv_async().await {
+    if let Commit(commit) = event {
+        match commit {
+            CommitEvent::Create { info, commit } => {
+                println ! ("Received create event: {:#?}", info);
+            }
+            CommitEvent::Update { info, commit } => {
+                println ! ("Received update event: {:#?}", info);
+            }
+            CommitEvent::Delete { info, commit } => {
+                println ! ("Received delete event: {:#?}", info);
+            }
+        }
+    }
+}
+```
+
 ## Example
 
 A small example CLI utility to show how to use this crate can be found in the `examples` directory. To run it, use the
