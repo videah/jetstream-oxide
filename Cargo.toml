@@ -28,6 +28,7 @@ zstd = "0.13.2"
 thiserror = "2.0.3"
 flume = "0.11.1"
 log = "0.4.22"
+tokio-util = "0.7.13"
 
 [dev-dependencies]
 anyhow = "1.0.93"

@@ -1,4 +1,4 @@
-///! Various error types.
+//! Various error types.
 use std::io;
 
 use thiserror::Error;
@@ -40,6 +40,4 @@ pub enum JetstreamEventError {
     CompressionDecoderError(io::Error),
     #[error("all receivers were dropped but the websocket connection failed to close cleanly")]
     WebSocketCloseFailure,
-    #[error("failed to connect to Jetstream instance: {0}")]
-    WebSocketFailure(#[from] tokio_tungstenite::tungstenite::Error),
 }

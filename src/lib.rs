@@ -4,13 +4,15 @@ pub mod exports;
 
 use std::{
     io::{Cursor, Read},
+    sync::Arc,
     time::Duration,
 };
 
 use chrono::Utc;
-use futures_util::stream::StreamExt;
-use tokio::net::TcpStream;
+use futures_util::{stream::StreamExt, SinkExt};
+use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 use zstd::dict::DecoderDictionary;
 
@@ -218,16 +220,23 @@ impl JetstreamConnector {
             .map_err(ConnectionError::InvalidEndpoint)?;
 
         tokio::task::spawn(async move {
-            for _ in 0..5 {
+            let max_retries = 10;
+            let base_delay_ms = 1_000; // 1 second
+            let max_delay_ms = 30_000; // 30 seconds
+
+            for retry_attempt in 0..max_retries {
                 let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
-                let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await else {
-                    log::error!("Web socket connetion failed");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    continue;
-                };
-                let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
-                log::error!("Web socket dropped, reconnecting...");
-                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                if let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await {
+                    let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
+                }
+
+                // Exponential backoff
+                let delay_ms = base_delay_ms * (2_u64.pow(retry_attempt));
+
+                log::error!("Connection failed, retrying in {delay_ms}ms...");
+                tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;
+                log::info!("Attempting to reconnect...")
             }
         });
 
@@ -243,9 +252,38 @@ async fn websocket_task(
     send_channel: JetstreamSender,
 ) -> Result<(), JetstreamEventError> {
     // TODO: Use the write half to allow the user to change configuration settings on the fly.
-    let (_, mut read) = ws.split();
+    let (socket_write, mut socket_read) = ws.split();
+    let shared_socket_write = Arc::new(Mutex::new(socket_write));
+
+    let ping_cancellation_token = CancellationToken::new();
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
+    let ping_cancelled = ping_cancellation_token.clone();
+    let ping_shared_socket_write = shared_socket_write.clone();
+    tokio::spawn(async move {
+        loop {
+            ping_interval.tick().await;
+            let false = ping_cancelled.is_cancelled() else {
+                break;
+            };
+            log::trace!("Sending ping");
+            match ping_shared_socket_write
+                .lock()
+                .await
+                .send(Message::Ping("ping".as_bytes().to_vec()))
+                .await
+            {
+                Ok(_) => (),
+                Err(error) => {
+                    log::error!("Ping failed: {error}");
+                    break;
+                }
+            }
+        }
+    });
+
+    let mut closing_connection = false;
     loop {
-        match read.next().await {
+        match socket_read.next().await {
             Some(Ok(message)) => {
                 match message {
                     Message::Text(json) => {
@@ -258,7 +296,7 @@ async fn websocket_task(
                             log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection."
                         );
-                            return Ok(());
+                            closing_connection = true;
                         }
                     }
                     Message::Binary(zstd_json) => {
@@ -283,20 +321,46 @@ async fn websocket_task(
                             log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection..."
                         );
-                            return Ok(());
+                            closing_connection = true;
                         }
                     }
-                    _ => {}
+                    Message::Ping(vec) => {
+                        log::trace!("Ping recieved, responding");
+                        _ = shared_socket_write
+                            .lock()
+                            .await
+                            .send(Message::Pong(vec))
+                            .await;
+                    }
+                    Message::Close(close_frame) => {
+                        if let Some(close_frame) = close_frame {
+                            let reason = close_frame.reason;
+                            let code = close_frame.code;
+                            log::trace!("Connection closed. Reason: {reason}, Code: {code}");
+                        }
+                    }
+                    Message::Pong(pong) => {
+                        let pong_payload =
+                            String::from_utf8(pong).unwrap_or("Invalid payload".to_string());
+                        log::trace!("Pong recieved. Payload: {pong_payload}");
+                    }
+                    Message::Frame(_) => (),
                 }
             }
             Some(Err(error)) => {
                 log::error!("Web socket error: {error}");
-                return Ok(());
+                ping_cancellation_token.cancel();
+                closing_connection = true;
             }
             None => {
                 log::error!("No web socket result");
-                return Ok(());
+                ping_cancellation_token.cancel();
+                closing_connection = true;
             }
+        }
+        if closing_connection {
+            _ = shared_socket_write.lock().await.close().await;
+            return Ok(());
         }
     }
 }
