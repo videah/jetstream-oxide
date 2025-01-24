@@ -2,32 +2,17 @@ pub mod error;
 pub mod events;
 pub mod exports;
 
-use std::io::{
-    Cursor,
-    Read,
-};
+use std::io::{Cursor, Read};
 
 use chrono::Utc;
 use futures_util::stream::StreamExt;
-use tokio::{
-    net::TcpStream,
-    task::JoinHandle,
-};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::Message,
-    MaybeTlsStream,
-    WebSocketStream,
-};
+use tokio::{net::TcpStream, task::JoinHandle};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
 use zstd::dict::DecoderDictionary;
 
 use crate::{
-    error::{
-        ConfigValidationError,
-        ConnectionError,
-        JetstreamEventError,
-    },
+    error::{ConfigValidationError, ConnectionError, JetstreamEventError},
     events::JetstreamEvent,
 };
 
@@ -260,45 +245,57 @@ async fn websocket_task(
     // TODO: Use the write half to allow the user to change configuration settings on the fly.
     let (_, mut read) = ws.split();
     loop {
-        if let Some(Ok(message)) = read.next().await {
-            match message {
-                Message::Text(json) => {
-                    let event = serde_json::from_str::<JetstreamEvent>(&json)
-                        .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
+        match read.next().await {
+            Some(Ok(message)) => {
+                match message {
+                    Message::Text(json) => {
+                        let event = serde_json::from_str::<JetstreamEvent>(&json)
+                            .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                    if let Err(_) = send_channel.send(event) {
-                        // We can assume that all receivers have been dropped, so we can close the
-                        // connection and exit the task.
-                        log::info!(
+                        if let Err(_) = send_channel.send(event) {
+                            // We can assume that all receivers have been dropped, so we can close the
+                            // connection and exit the task.
+                            log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection."
                         );
-                        return Ok(());
+                            return Ok(());
+                        }
                     }
-                }
-                Message::Binary(zstd_json) => {
-                    let mut cursor = Cursor::new(zstd_json);
-                    let mut decoder =
-                        zstd::stream::Decoder::with_prepared_dictionary(&mut cursor, &dictionary)
-                            .map_err(JetstreamEventError::CompressionDictionaryError)?;
+                    Message::Binary(zstd_json) => {
+                        let mut cursor = Cursor::new(zstd_json);
+                        let mut decoder = zstd::stream::Decoder::with_prepared_dictionary(
+                            &mut cursor,
+                            &dictionary,
+                        )
+                        .map_err(JetstreamEventError::CompressionDictionaryError)?;
 
-                    let mut json = String::new();
-                    decoder
-                        .read_to_string(&mut json)
-                        .map_err(JetstreamEventError::CompressionDecoderError)?;
+                        let mut json = String::new();
+                        decoder
+                            .read_to_string(&mut json)
+                            .map_err(JetstreamEventError::CompressionDecoderError)?;
 
-                    let event = serde_json::from_str::<JetstreamEvent>(&json)
-                        .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
+                        let event = serde_json::from_str::<JetstreamEvent>(&json)
+                            .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                    if let Err(_) = send_channel.send(event) {
-                        // We can assume that all receivers have been dropped, so we can close the
-                        // connection and exit the task.
-                        log::info!(
+                        if let Err(_) = send_channel.send(event) {
+                            // We can assume that all receivers have been dropped, so we can close the
+                            // connection and exit the task.
+                            log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection..."
                         );
-                        return Ok(());
+                            return Ok(());
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
+            }
+            Some(Err(error)) => {
+                log::error!("Web socket error: {error}");
+                return Ok(());
+            }
+            None => {
+                log::error!("No web socket result");
+                return Ok(());
             }
         }
     }
