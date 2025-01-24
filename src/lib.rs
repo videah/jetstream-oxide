@@ -252,7 +252,7 @@ async fn websocket_task(
                         let event = serde_json::from_str::<JetstreamEvent>(&json)
                             .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                        if send_channel.send(event).is_ok() {
+                        if send_channel.send(event).is_err() {
                             // We can assume that all receivers have been dropped, so we can close the
                             // connection and exit the task.
                             log::info!(
@@ -277,7 +277,7 @@ async fn websocket_task(
                         let event = serde_json::from_str::<JetstreamEvent>(&json)
                             .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                        if send_channel.send(event).is_ok() {
+                        if send_channel.send(event).is_err() {
                             // We can assume that all receivers have been dropped, so we can close the
                             // connection and exit the task.
                             log::info!(
