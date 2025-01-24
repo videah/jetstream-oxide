@@ -2,11 +2,14 @@ pub mod error;
 pub mod events;
 pub mod exports;
 
-use std::io::{Cursor, Read};
+use std::{
+    io::{Cursor, Read},
+    time::Duration,
+};
 
 use chrono::Utc;
 use futures_util::stream::StreamExt;
-use tokio::{net::TcpStream, task::JoinHandle};
+use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
 use zstd::dict::DecoderDictionary;
@@ -131,7 +134,7 @@ impl Default for JetstreamConfig {
 
 impl JetstreamConfig {
     /// Constructs a new endpoint URL with the given [JetstreamConfig] applied.
-    pub fn construct_endpoint(&self, endpoint: &String) -> Result<Url, url::ParseError> {
+    pub fn construct_endpoint(&self, endpoint: &str) -> Result<Url, url::ParseError> {
         let did_search_query = self
             .wanted_dids
             .iter()
@@ -157,10 +160,10 @@ impl JetstreamConfig {
         let params = did_search_query
             .chain(collection_search_query)
             .chain(std::iter::once(compression))
-            .chain(cursor.into_iter())
+            .chain(cursor)
             .collect::<Vec<(&str, String)>>();
 
-        Url::parse_with_params(&endpoint, params)
+        Url::parse_with_params(endpoint, params)
     }
 
     /// Validates the configuration to make sure it is within the limits of the Jetstream API.
@@ -200,15 +203,7 @@ impl JetstreamConnector {
     ///
     /// A [JetstreamReceiver] is returned which can be used to respond to events. When all instances
     /// of this receiver are dropped, the connection and task are automatically closed.
-    pub async fn connect(
-        &self,
-    ) -> Result<
-        (
-            JetstreamReceiver,
-            JoinHandle<Result<(), JetstreamEventError>>,
-        ),
-        ConnectionError,
-    > {
+    pub async fn connect(&self) -> Result<JetstreamReceiver, ConnectionError> {
         // We validate the config again for good measure. Probably not necessary but it can't hurt.
         self.config
             .validate()
@@ -222,16 +217,21 @@ impl JetstreamConnector {
             .construct_endpoint(&self.config.endpoint)
             .map_err(ConnectionError::InvalidEndpoint)?;
 
-        let (ws_stream, _) = connect_async(&configured_endpoint)
-            .await
-            .map_err(ConnectionError::WebSocketFailure)?;
+        tokio::task::spawn(async move {
+            for _ in 0..5 {
+                let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
+                let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await else {
+                    log::error!("Web socket connetion failed");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                };
+                let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
+                log::error!("Web socket dropped, reconnecting...");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        });
 
-        let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
-
-        // TODO: Internally creating and returning a tokio task might not be the best idea(?)
-        let handle = tokio::task::spawn(websocket_task(dict, ws_stream, send_channel));
-
-        Ok((receive_channel, handle))
+        Ok(receive_channel)
     }
 }
 
@@ -252,7 +252,7 @@ async fn websocket_task(
                         let event = serde_json::from_str::<JetstreamEvent>(&json)
                             .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                        if let Err(_) = send_channel.send(event) {
+                        if send_channel.send(event).is_ok() {
                             // We can assume that all receivers have been dropped, so we can close the
                             // connection and exit the task.
                             log::info!(
@@ -277,7 +277,7 @@ async fn websocket_task(
                         let event = serde_json::from_str::<JetstreamEvent>(&json)
                             .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                        if let Err(_) = send_channel.send(event) {
+                        if send_channel.send(event).is_ok() {
                             // We can assume that all receivers have been dropped, so we can close the
                             // connection and exit the task.
                             log::info!(

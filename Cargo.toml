@@ -10,9 +10,15 @@ readme = "README.md"
 
 [dependencies]
 async-trait = "0.1.83"
-atrium-api = { version = "0.24.7", default-features = false, features = ["namespace-appbsky"] }
-tokio = { version = "1.41.1", features = ["full", "sync"] }
-tokio-tungstenite = { version = "0.24.0", features = ["connect", "native-tls-vendored", "url"] }
+atrium-api = { version = "0.24.7", default-features = false, features = [
+    "namespace-appbsky",
+] }
+tokio = { version = "1.41.1", features = ["full", "sync", "time"] }
+tokio-tungstenite = { version = "0.24.0", features = [
+    "connect",
+    "native-tls-vendored",
+    "url",
+] }
 futures-util = "0.3.31"
 url = "2.5.3"
 serde = { version = "1.0.215", features = ["derive"] }
