@@ -238,6 +238,7 @@ impl JetstreamConnector {
                 tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;
                 log::info!("Attempting to reconnect...")
             }
+            log::error!("Connection retries exhausted. Jetstream is disconnected.");
         });
 
         Ok(receive_channel)
