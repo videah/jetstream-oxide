@@ -1,6 +1,5 @@
-///! Various error types.
+//! Various error types.
 use std::io;
-
 
 use thiserror::Error;
 

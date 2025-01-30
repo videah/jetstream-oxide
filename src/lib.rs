@@ -2,32 +2,22 @@ pub mod error;
 pub mod events;
 pub mod exports;
 
-use std::io::{
-    Cursor,
-    Read,
+use std::{
+    io::{Cursor, Read},
+    sync::Arc,
+    time::Duration,
 };
 
 use chrono::Utc;
-use futures_util::stream::StreamExt;
-use tokio::{
-    net::TcpStream,
-    task::JoinHandle,
-};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::Message,
-    MaybeTlsStream,
-    WebSocketStream,
-};
+use futures_util::{stream::StreamExt, SinkExt};
+use tokio::{net::TcpStream, sync::Mutex};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 use zstd::dict::DecoderDictionary;
 
 use crate::{
-    error::{
-        ConfigValidationError,
-        ConnectionError,
-        JetstreamEventError,
-    },
+    error::{ConfigValidationError, ConnectionError, JetstreamEventError},
     events::JetstreamEvent,
 };
 
@@ -146,7 +136,7 @@ impl Default for JetstreamConfig {
 
 impl JetstreamConfig {
     /// Constructs a new endpoint URL with the given [JetstreamConfig] applied.
-    pub fn construct_endpoint(&self, endpoint: &String) -> Result<Url, url::ParseError> {
+    pub fn construct_endpoint(&self, endpoint: &str) -> Result<Url, url::ParseError> {
         let did_search_query = self
             .wanted_dids
             .iter()
@@ -172,10 +162,10 @@ impl JetstreamConfig {
         let params = did_search_query
             .chain(collection_search_query)
             .chain(std::iter::once(compression))
-            .chain(cursor.into_iter())
+            .chain(cursor)
             .collect::<Vec<(&str, String)>>();
 
-        Url::parse_with_params(&endpoint, params)
+        Url::parse_with_params(endpoint, params)
     }
 
     /// Validates the configuration to make sure it is within the limits of the Jetstream API.
@@ -215,15 +205,7 @@ impl JetstreamConnector {
     ///
     /// A [JetstreamReceiver] is returned which can be used to respond to events. When all instances
     /// of this receiver are dropped, the connection and task are automatically closed.
-    pub async fn connect(
-        &self,
-    ) -> Result<
-        (
-            JetstreamReceiver,
-            JoinHandle<Result<(), JetstreamEventError>>,
-        ),
-        ConnectionError,
-    > {
+    pub async fn connect(&self) -> Result<JetstreamReceiver, ConnectionError> {
         // We validate the config again for good measure. Probably not necessary but it can't hurt.
         self.config
             .validate()
@@ -237,16 +219,29 @@ impl JetstreamConnector {
             .construct_endpoint(&self.config.endpoint)
             .map_err(ConnectionError::InvalidEndpoint)?;
 
-        let (ws_stream, _) = connect_async(&configured_endpoint)
-            .await
-            .map_err(ConnectionError::WebSocketFailure)?;
+        tokio::task::spawn(async move {
+            let max_retries = 10;
+            let base_delay_ms = 1_000; // 1 second
+            let max_delay_ms = 30_000; // 30 seconds
 
-        let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
+            for retry_attempt in 0..max_retries {
+                let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
 
-        // TODO: Internally creating and returning a tokio task might not be the best idea(?)
-        let handle = tokio::task::spawn(websocket_task(dict, ws_stream, send_channel));
+                if let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await {
+                    let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
+                }
 
-        Ok((receive_channel, handle))
+                // Exponential backoff
+                let delay_ms = base_delay_ms * (2_u64.pow(retry_attempt));
+
+                log::error!("Connection failed, retrying in {delay_ms}ms...");
+                tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;
+                log::info!("Attempting to reconnect...")
+            }
+            log::error!("Connection retries exhausted. Jetstream is disconnected.");
+        });
+
+        Ok(receive_channel)
     }
 }
 
@@ -258,48 +253,115 @@ async fn websocket_task(
     send_channel: JetstreamSender,
 ) -> Result<(), JetstreamEventError> {
     // TODO: Use the write half to allow the user to change configuration settings on the fly.
-    let (_, mut read) = ws.split();
-    loop {
-        if let Some(Ok(message)) = read.next().await {
-            match message {
-                Message::Text(json) => {
-                    let event = serde_json::from_str::<JetstreamEvent>(&json)
-                        .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
+    let (socket_write, mut socket_read) = ws.split();
+    let shared_socket_write = Arc::new(Mutex::new(socket_write));
 
-                    if let Err(_) = send_channel.send(event) {
-                        // We can assume that all receivers have been dropped, so we can close the
-                        // connection and exit the task.
-                        log::info!(
+    let ping_cancellation_token = CancellationToken::new();
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
+    let ping_cancelled = ping_cancellation_token.clone();
+    let ping_shared_socket_write = shared_socket_write.clone();
+    tokio::spawn(async move {
+        loop {
+            ping_interval.tick().await;
+            let false = ping_cancelled.is_cancelled() else {
+                break;
+            };
+            log::trace!("Sending ping");
+            match ping_shared_socket_write
+                .lock()
+                .await
+                .send(Message::Ping("ping".as_bytes().to_vec()))
+                .await
+            {
+                Ok(_) => (),
+                Err(error) => {
+                    log::error!("Ping failed: {error}");
+                    break;
+                }
+            }
+        }
+    });
+
+    let mut closing_connection = false;
+    loop {
+        match socket_read.next().await {
+            Some(Ok(message)) => {
+                match message {
+                    Message::Text(json) => {
+                        let event = serde_json::from_str::<JetstreamEvent>(&json)
+                            .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
+
+                        if send_channel.send(event).is_err() {
+                            // We can assume that all receivers have been dropped, so we can close the
+                            // connection and exit the task.
+                            log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection."
                         );
-                        return Ok(());
+                            closing_connection = true;
+                        }
                     }
-                }
-                Message::Binary(zstd_json) => {
-                    let mut cursor = Cursor::new(zstd_json);
-                    let mut decoder =
-                        zstd::stream::Decoder::with_prepared_dictionary(&mut cursor, &dictionary)
-                            .map_err(JetstreamEventError::CompressionDictionaryError)?;
+                    Message::Binary(zstd_json) => {
+                        let mut cursor = Cursor::new(zstd_json);
+                        let mut decoder = zstd::stream::Decoder::with_prepared_dictionary(
+                            &mut cursor,
+                            &dictionary,
+                        )
+                        .map_err(JetstreamEventError::CompressionDictionaryError)?;
 
-                    let mut json = String::new();
-                    decoder
-                        .read_to_string(&mut json)
-                        .map_err(JetstreamEventError::CompressionDecoderError)?;
+                        let mut json = String::new();
+                        decoder
+                            .read_to_string(&mut json)
+                            .map_err(JetstreamEventError::CompressionDecoderError)?;
 
-                    let event = serde_json::from_str::<JetstreamEvent>(&json)
-                        .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
+                        let event = serde_json::from_str::<JetstreamEvent>(&json)
+                            .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
-                    if let Err(_) = send_channel.send(event) {
-                        // We can assume that all receivers have been dropped, so we can close the
-                        // connection and exit the task.
-                        log::info!(
+                        if send_channel.send(event).is_err() {
+                            // We can assume that all receivers have been dropped, so we can close the
+                            // connection and exit the task.
+                            log::info!(
                             "All receivers for the Jetstream connection have been dropped, closing connection..."
                         );
-                        return Ok(());
+                            closing_connection = true;
+                        }
                     }
+                    Message::Ping(vec) => {
+                        log::trace!("Ping recieved, responding");
+                        _ = shared_socket_write
+                            .lock()
+                            .await
+                            .send(Message::Pong(vec))
+                            .await;
+                    }
+                    Message::Close(close_frame) => {
+                        if let Some(close_frame) = close_frame {
+                            let reason = close_frame.reason;
+                            let code = close_frame.code;
+                            log::trace!("Connection closed. Reason: {reason}, Code: {code}");
+                        }
+                    }
+                    Message::Pong(pong) => {
+                        let pong_payload =
+                            String::from_utf8(pong).unwrap_or("Invalid payload".to_string());
+                        log::trace!("Pong recieved. Payload: {pong_payload}");
+                    }
+                    Message::Frame(_) => (),
                 }
-                _ => {}
             }
+            Some(Err(error)) => {
+                log::error!("Web socket error: {error}");
+                ping_cancellation_token.cancel();
+                closing_connection = true;
+            }
+            None => {
+                log::error!("No web socket result");
+                ping_cancellation_token.cancel();
+                closing_connection = true;
+            }
+        }
+        if closing_connection {
+            _ = shared_socket_write.lock().await.close().await;
+            return Ok(());
         }
     }
 }

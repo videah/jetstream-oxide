@@ -1,19 +1,10 @@
 //! A very basic example of how to listen for create/delete events on a specific DID and NSID.
 
-use atrium_api::{
-    record::KnownRecord::AppBskyFeedPost,
-    types::string,
-};
+use atrium_api::{record::KnownRecord::AppBskyFeedPost, types::string};
 use clap::Parser;
 use jetstream_oxide::{
-    events::{
-        commit::CommitEvent,
-        JetstreamEvent::Commit,
-    },
-    DefaultJetstreamEndpoints,
-    JetstreamCompression,
-    JetstreamConfig,
-    JetstreamConnector,
+    events::{commit::CommitEvent, JetstreamEvent::Commit},
+    DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector,
 };
 
 #[derive(Parser, Debug)]
@@ -41,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let jetstream = JetstreamConnector::new(config)?;
-    let (receiver, _) = jetstream.connect().await?;
+    let receiver = jetstream.connect().await?;
 
     println!(
         "Listening for '{}' events on DIDs: {:?}",
