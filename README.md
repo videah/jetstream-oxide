@@ -9,28 +9,28 @@ service.
 
 ```rust
 let config = JetstreamConfig {
-endpoint: DefaultJetstreamEndpoints::USEastOne.into(),
-compression: JetstreamCompression::Zstd,
-..Default::default ()
+    endpoint: DefaultJetstreamEndpoints::USEastOne.into(),
+    compression: JetstreamCompression::Zstd,
+    ..Default::default()
 };
 
 let jetstream = JetstreamConnector::new(config).unwrap();
 let receiver = jetstream.connect().await?;
 
 while let Ok(event) = receiver.recv_async().await {
-if let Commit(commit) = event {
-match commit {
-CommitEvent::Create { info, commit } => {
-println ! ("Received create event: {:#?}", info);
-}
-CommitEvent::Update { info, commit } => {
-println ! ("Received update event: {:#?}", info);
-}
-CommitEvent::Delete { info, commit } => {
-println ! ("Received delete event: {:#?}", info);
-}
-}
-}
+    if let Commit(commit) = event {
+        match commit {
+            CommitEvent::Create { info, commit } => {
+                println!("Received create event: {:#?}", info);
+            }
+            CommitEvent::Update { info, commit } => {
+                println!("Received update event: {:#?}", info);
+            }
+            CommitEvent::Delete { info, commit } => {
+                println!("Received delete event: {:#?}", info);
+            }
+        }
+    }
 }
 ```
 
