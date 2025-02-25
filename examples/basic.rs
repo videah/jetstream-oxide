@@ -3,8 +3,7 @@
 use atrium_api::{record::KnownRecord::AppBskyFeedPost, types::string};
 use clap::Parser;
 use jetstream_oxide::{
-    events::{commit::CommitEvent, JetstreamEvent::Commit},
-    DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector,
+    events::{commit::CommitEvent, JetstreamEvent::Commit}, RetriesConfig, DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector
 };
 
 #[derive(Parser, Debug)]
@@ -32,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let jetstream = JetstreamConnector::new(config)?;
-    let receiver = jetstream.connect().await?;
+    let receiver = jetstream.connect(RetriesConfig::new()).await?;
 
     println!(
         "Listening for '{}' events on DIDs: {:?}",

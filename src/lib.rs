@@ -191,6 +191,28 @@ impl JetstreamConfig {
     }
 }
 
+pub struct RetriesConfig {
+    pub max_retries: u32,
+    pub max_delay_ms: u64,
+    pub base_delay_ms: u64,
+}
+
+impl Default for RetriesConfig {
+    fn default() -> Self {
+        RetriesConfig {
+            max_retries: 10,
+            max_delay_ms: 30_000,
+            base_delay_ms: 1_000,
+        }
+    }
+}
+
+impl RetriesConfig {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
 impl JetstreamConnector {
     /// Create a Jetstream connector with a valid [JetstreamConfig].
     ///
@@ -205,7 +227,7 @@ impl JetstreamConnector {
     ///
     /// A [JetstreamReceiver] is returned which can be used to respond to events. When all instances
     /// of this receiver are dropped, the connection and task are automatically closed.
-    pub async fn connect(&self) -> Result<JetstreamReceiver, ConnectionError> {
+    pub async fn connect(&self, retries_config: RetriesConfig) -> Result<JetstreamReceiver, ConnectionError> {
         // We validate the config again for good measure. Probably not necessary but it can't hurt.
         self.config
             .validate()
@@ -220,23 +242,28 @@ impl JetstreamConnector {
             .map_err(ConnectionError::InvalidEndpoint)?;
 
         tokio::task::spawn(async move {
-            let max_retries = 10;
-            let base_delay_ms = 1_000; // 1 second
-            let max_delay_ms = 30_000; // 30 seconds
+            
+            let mut retry_attempt = 0;
 
-            for retry_attempt in 0..max_retries {
+            loop {
                 let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
 
                 if let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await {
                     let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
+                    retry_attempt = 0;
                 }
 
-                // Exponential backoff
-                let delay_ms = base_delay_ms * (2_u64.pow(retry_attempt));
+                retry_attempt += 1;
+                
+                if retry_attempt >= retries_config.max_retries {
+                    break;
+                } 
 
+                // Exponential backoff
+                let delay_ms = retries_config.base_delay_ms * (2_u64.pow(retry_attempt));
                 log::error!("Connection failed, retrying in {delay_ms}ms...");
-                tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;
-                log::info!("Attempting to reconnect...")
+                tokio::time::sleep(Duration::from_millis(delay_ms.min(retries_config.max_delay_ms))).await;                
+                log::info!("Attempting to reconnect...");
             }
             log::error!("Connection retries exhausted. Jetstream is disconnected.");
         });

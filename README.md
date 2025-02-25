@@ -15,7 +15,7 @@ let config = JetstreamConfig {
 };
 
 let jetstream = JetstreamConnector::new(config).unwrap();
-let receiver = jetstream.connect().await?;
+let receiver = jetstream.connect(RetriesConfig::new()).await?;
 
 while let Ok(event) = receiver.recv_async().await {
     if let Commit(commit) = event {
@@ -54,6 +54,6 @@ cargo run --example basic -- \
 --did "did:plc:inze6wrmsm7pjl7yta3oig77"
 ```
 
-This listens for posts that *I personally make*. You can substitute your own DID and make a few test posts yourself if
+This listens for posts that _I personally make_. You can substitute your own DID and make a few test posts yourself if
 you'd
 like of course!
