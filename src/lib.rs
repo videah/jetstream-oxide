@@ -10,7 +10,7 @@ use std::{
 
 use chrono::Utc;
 use futures_util::{stream::StreamExt, SinkExt};
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::{net::TcpStream, sync::Mutex, time::Instant};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -120,6 +120,18 @@ pub struct JetstreamConfig {
     /// When reconnecting, use the time_us from your most recently processed event and maybe
     /// provide a negative buffer (i.e. subtract a few seconds) to ensure gapless playback.
     pub cursor: Option<chrono::DateTime<Utc>>,
+
+    // Maximum number of connection retries before giving up
+    pub max_retries: u32,
+
+    // Maximum number of milliseconds to wait between connection retries
+    pub max_delay_ms: u64,
+
+    // The base time unit between connection attempts, in milliseconds.
+    pub base_delay_ms: u64,
+
+    // Minimum time the connection must remain alive for the retries count to be reset.
+    pub reset_retries_min_ms: u64,
 }
 
 impl Default for JetstreamConfig {
@@ -130,6 +142,10 @@ impl Default for JetstreamConfig {
             wanted_dids: Vec::new(),
             compression: JetstreamCompression::None,
             cursor: None,
+            max_retries: 10,
+            max_delay_ms: 30_000,
+            base_delay_ms: 1_000,
+            reset_retries_min_ms: 30_000
         }
     }
 }
@@ -219,24 +235,40 @@ impl JetstreamConnector {
             .construct_endpoint(&self.config.endpoint)
             .map_err(ConnectionError::InvalidEndpoint)?;
 
-        tokio::task::spawn(async move {
-            let max_retries = 10;
-            let base_delay_ms = 1_000; // 1 second
-            let max_delay_ms = 30_000; // 30 seconds
+        let max_delay_ms = self.config.max_delay_ms;
+        let base_delay_ms = self.config.base_delay_ms;
+        let max_retries = self.config.max_retries;
+        let min_duration_before_retry_reset = Duration::from_millis(self.config.reset_retries_min_ms);
 
-            for retry_attempt in 0..max_retries {
+        tokio::task::spawn(async move {
+            
+            let mut retry_attempt = 0;
+
+            loop {
                 let dict = DecoderDictionary::copy(JETSTREAM_ZSTD_DICTIONARY);
 
                 if let Ok((ws_stream, _)) = connect_async(&configured_endpoint).await {
+                    let now = Instant::now();
                     let _ = websocket_task(dict, ws_stream, send_channel.clone()).await;
+                    let after_connection_closed = Instant::now();
+                    if let Some(connection_alive_duration) = after_connection_closed.checked_duration_since(now) {
+                        if connection_alive_duration > min_duration_before_retry_reset  {
+                            retry_attempt = 0
+                        }
+                    }
                 }
+
+                retry_attempt += 1;
+                
+                if retry_attempt >= max_retries {
+                    break;
+                } 
 
                 // Exponential backoff
                 let delay_ms = base_delay_ms * (2_u64.pow(retry_attempt));
-
                 log::error!("Connection failed, retrying in {delay_ms}ms...");
-                tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;
-                log::info!("Attempting to reconnect...")
+                tokio::time::sleep(Duration::from_millis(delay_ms.min(max_delay_ms))).await;                
+                log::info!("Attempting to reconnect...");
             }
             log::error!("Connection retries exhausted. Jetstream is disconnected.");
         });
