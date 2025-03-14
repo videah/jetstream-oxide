@@ -10,7 +10,7 @@ readme = "README.md"
 
 [dependencies]
 async-trait = "0.1.83"
-atrium-api = { version = "0.24.7", default-features = false, features = [
+atrium-api = { version = "0.25", default-features = false, features = [
     "namespace-appbsky",
 ] }
 tokio = { version = "1.41.1", features = ["full", "sync", "time"] }
