@@ -3,8 +3,7 @@
 use atrium_api::{record::KnownRecord::AppBskyFeedPost, types::string};
 use clap::Parser;
 use jetstream_oxide::{
-    events::{commit::CommitEvent, JetstreamEvent::Commit},
-    DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector,
+    events::{commit::CommitEvent, JetstreamEvent::Commit}, DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector
 };
 
 #[derive(Parser, Debug)]
@@ -29,6 +28,10 @@ async fn main() -> anyhow::Result<()> {
         wanted_dids: dids.clone(),
         compression: JetstreamCompression::Zstd,
         cursor: None,
+        max_retries: 10,
+        max_delay_ms: 30_000,
+        base_delay_ms: 1_000,
+        reset_retries_min_ms: 30_000
     };
 
     let jetstream = JetstreamConnector::new(config)?;
