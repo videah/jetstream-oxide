@@ -1,7 +1,7 @@
 [package]
 authors = ["videah <videah@selfish.systems>"]
 name = "jetstream-oxide"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT"
 description = "Library for easily interacting with and consuming the Bluesky Jetstream service."
