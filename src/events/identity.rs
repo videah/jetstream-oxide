@@ -1,13 +1,11 @@
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::{
-    events::EventInfo,
-    exports,
-};
+use crate::{events::EventInfo, exports};
 
 /// An event representing a change to an identity.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct IdentityEvent {
     /// Basic metadata included with every event.
     #[serde(flatten)]
@@ -18,6 +16,7 @@ pub struct IdentityEvent {
 
 /// Identity specific data bundled with an identity event.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct IdentityData {
     /// The DID of the identity.
     pub did: exports::Did,

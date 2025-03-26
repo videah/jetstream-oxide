@@ -18,16 +18,16 @@ let jetstream = JetstreamConnector::new(config).unwrap();
 let receiver = jetstream.connect().await?;
 
 while let Ok(event) = receiver.recv_async().await {
-    if let Commit(commit) = event {
-        match commit {
-            CommitEvent::Create { info, commit } => {
-                println!("Received create event: {:#?}", info);
+    if let Commit(commit_event) = event {
+        match commit_event.commit {
+            CommitData::Create { .. } => {
+                println!("Received create event: {:#?}", commit_event.info);
             }
-            CommitEvent::Update { info, commit } => {
-                println!("Received update event: {:#?}", info);
+            CommitData::Update { .. } => {
+                println!("Received update event: {:#?}", commit_event.info);
             }
-            CommitEvent::Delete { info, commit } => {
-                println!("Received delete event: {:#?}", info);
+            CommitData::Delete { .. } => {
+                println!("Received delete event: {:#?}", commit_event.info);
             }
         }
     }
