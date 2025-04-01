@@ -1,61 +1,52 @@
 use atrium_api::record::KnownRecord;
 use serde::Deserialize;
 
-use crate::{
-    events::EventInfo,
-    exports,
-};
+use crate::{events::EventInfo, exports};
 
-/// An event representing a repo commit, which can be a `create`, `update`, or `delete` operation.
+/// An event representing a repo commit.
 #[derive(Deserialize, Debug)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum CommitEvent {
-    Create {
-        #[serde(flatten)]
-        info: EventInfo,
-        commit: CommitData,
-    },
-    Update {
-        #[serde(flatten)]
-        info: EventInfo,
-        commit: CommitData,
-    },
-    Delete {
-        #[serde(flatten)]
-        info: EventInfo,
-        commit: CommitInfo,
-    },
-}
-
-/// The type of commit operation that was performed.
-#[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(rename_all = "snake_case")]
-pub enum CommitType {
-    Create,
-    Update,
-    Delete,
+pub struct CommitEvent {
+    #[serde(flatten)]
+    pub info: EventInfo,
+    pub commit: CommitData,
 }
 
 /// Basic commit specific info bundled with every event, also the only data included with a `delete`
 /// operation.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct CommitInfo {
-    /// The type of commit operation that was performed.
-    pub operation: CommitType,
     pub rev: String,
     pub rkey: String,
     /// The NSID of the record type that this commit is associated with.
     pub collection: exports::Nsid,
 }
 
-/// Detailed data bundled with a commit event. This data is only included when the event is
-/// `create` or `update`.
+/// Detailed data bundled with a commit event.
 #[derive(Deserialize, Debug)]
-pub struct CommitData {
-    #[serde(flatten)]
-    pub info: CommitInfo,
-    /// The CID of the record that was operated on.
-    pub cid: exports::Cid,
-    /// The record that was operated on.
-    pub record: KnownRecord,
+#[cfg_attr(test, derive(PartialEq))]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum CommitData {
+    Create {
+        #[serde(flatten)]
+        info: CommitInfo,
+        /// The CID of the record that was operated on.
+        cid: exports::Cid,
+        /// The record that was operated on.
+        record: KnownRecord,
+    },
+    Update {
+        #[serde(flatten)]
+        info: CommitInfo,
+        /// The CID of the record that was operated on.
+        cid: exports::Cid,
+        /// The record that was operated on.
+        record: KnownRecord,
+    },
+    Delete {
+        #[serde(flatten)]
+        info: CommitInfo,
+    },
 }

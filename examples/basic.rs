@@ -3,7 +3,8 @@
 use atrium_api::{record::KnownRecord::AppBskyFeedPost, types::string};
 use clap::Parser;
 use jetstream_oxide::{
-    events::{commit::CommitEvent, JetstreamEvent::Commit}, DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector
+    events::{commit::CommitData, JetstreamEvent::Commit},
+    DefaultJetstreamEndpoints, JetstreamCompression, JetstreamConfig, JetstreamConnector,
 };
 
 #[derive(Parser, Debug)]
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         max_retries: 10,
         max_delay_ms: 30_000,
         base_delay_ms: 1_000,
-        reset_retries_min_ms: 30_000
+        reset_retries_min_ms: 30_000,
     };
 
     let jetstream = JetstreamConnector::new(config)?;
@@ -44,18 +45,17 @@ async fn main() -> anyhow::Result<()> {
     );
 
     while let Ok(event) = receiver.recv_async().await {
-        if let Commit(commit) = event {
-            match commit {
-                CommitEvent::Create { info: _, commit } => {
-                    if let AppBskyFeedPost(record) = commit.record {
-                        println!(
-                            "New post created! ({})\n\n'{}'",
-                            commit.info.rkey, record.text
-                        );
-                    }
+        if let Commit(event) = event {
+            match event.commit {
+                CommitData::Create {
+                    info,
+                    cid: _cid,
+                    record: AppBskyFeedPost(record),
+                } => {
+                    println!("New post created! ({})\n\n'{}'", info.rkey, record.text);
                 }
-                CommitEvent::Delete { info: _, commit } => {
-                    println!("A post has been deleted. ({})", commit.rkey);
+                CommitData::Delete { info } => {
+                    println!("A post has been deleted. ({})", info.rkey);
                 }
                 _ => {}
             }

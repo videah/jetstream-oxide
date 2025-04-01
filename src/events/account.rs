@@ -1,13 +1,11 @@
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::{
-    events::EventInfo,
-    exports,
-};
+use crate::{events::EventInfo, exports};
 
 /// An event representing a change to an account.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct AccountEvent {
     /// Basic metadata included with every event.
     #[serde(flatten)]
@@ -18,6 +16,7 @@ pub struct AccountEvent {
 
 /// Account specific data bundled with an account event.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct AccountData {
     /// Whether the account is currently active.
     pub active: bool,
@@ -31,6 +30,7 @@ pub struct AccountData {
 
 /// The possible reasons an account might be listed as inactive.
 #[derive(Deserialize, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(rename_all = "lowercase")]
 pub enum AccountStatus {
     Deactivated,
