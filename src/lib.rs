@@ -3,7 +3,7 @@ pub mod events;
 pub mod exports;
 
 use std::{
-    io::{Cursor, Read},
+    io::Cursor,
     sync::Arc,
     time::Duration,
 };
@@ -334,18 +334,13 @@ async fn websocket_task(
                     }
                     Message::Binary(zstd_json) => {
                         let mut cursor = Cursor::new(zstd_json);
-                        let mut decoder = zstd::stream::Decoder::with_prepared_dictionary(
+                        let decoder = zstd::stream::Decoder::with_prepared_dictionary(
                             &mut cursor,
                             &dictionary,
                         )
                         .map_err(JetstreamEventError::CompressionDictionaryError)?;
 
-                        let mut json = String::new();
-                        decoder
-                            .read_to_string(&mut json)
-                            .map_err(JetstreamEventError::CompressionDecoderError)?;
-
-                        let event = serde_json::from_str::<JetstreamEvent>(&json)
+                        let event: JetstreamEvent = serde_json::from_reader(decoder)
                             .map_err(JetstreamEventError::ReceivedMalformedJSON)?;
 
                         if send_channel.send(event).is_err() {
