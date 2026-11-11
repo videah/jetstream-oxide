@@ -179,6 +179,34 @@ mod test {
     }
 
     #[test]
+    fn parse_account_throttled() {
+        // Shape of a real event seen on the public Jetstream instances.
+        let event_json: &str = r#"{
+            "did": "did:plc:z72i7hdynmk6r22z27h6tvur",
+            "time_us": 1794367767291647,
+            "kind": "account",
+            "account": {
+              "active": false,
+              "did": "did:plc:z72i7hdynmk6r22z27h6tvur",
+              "seq": 35418013047,
+              "status": "throttled",
+              "time": "2026-11-11T03:29:26.799Z"
+            }
+          }
+        "#;
+
+        let parsed: JetstreamEvent = serde_json::from_str(event_json).unwrap();
+        let JetstreamEvent::Account(event) = parsed else {
+            panic!("expected an account event, got {parsed:?}");
+        };
+        assert!(!event.account.active);
+        assert_eq!(
+            event.account.status,
+            Some(account::AccountStatus::Throttled)
+        );
+    }
+
+    #[test]
     fn parse_identity() {
         let event_json: &str = r#"{
             "did": "did:plc:4ysnxi6vujpjhovgtn5k4ztr",
